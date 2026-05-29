@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Predicción del nivel de riesgo asociado al cáncer de pulmón</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+  <main class="app-shell">
+    <div class="container py-5">
+      <div class="main-card">
+        <section class="hero-panel">
+          <div class="hero-copy">
+            <span class="eyebrow">Modelo predictivo · Extra Trees Classifier</span>
+            <h1>Predicción del nivel de riesgo asociado al cáncer de pulmón</h1>
+            <p>
+              Seleccione la opción que mejor describa la situación del usuario en cada variable.
+              El sistema transforma internamente cada selección en el valor numérico requerido por el modelo.
+            </p>
+          </div>
+          <div class="hero-visual">
+            <img src="{{ url_for('static', filename=report_images['hero']) }}" alt="Ilustración referencial de pulmones" class="hero-image">
+          </div>
+        </section>
+
+        <div class="notice-box">
+          <strong>Nota:</strong> las descripciones son una guía orientativa para facilitar el uso del prototipo.
+          No constituyen una escala clínica validada ni reemplazan una evaluación médica.
+        </div>
+
+        <form id="prediction-form" class="row g-4 mt-2">
+          {% for feature in features %}
+          {% set safe_id = feature|replace(' ', '_') %}
+          <div class="col-md-6">
+            <div class="field-card h-100">
+              <div class="field-header">
+                <div class="field-icon-wrap">
+                  <img src="{{ url_for('static', filename=variable_images[feature]) }}" alt="{{ labels[feature] }}" class="field-icon">
+                </div>
+                <div>
+                  <label class="form-label mb-1" for="{{ safe_id }}">{{ labels[feature] }}</label>
+                  <div class="field-subtitle">Rango original del dataset: {{ ranges[feature][0] }} a {{ ranges[feature][1] }}</div>
+                </div>
+              </div>
+
+              <select
+                class="form-select"
+                id="{{ safe_id }}"
+                name="{{ feature }}"
+                data-help-id="help-{{ safe_id }}"
+                data-range-text="Rango original del dataset: {{ ranges[feature][0] }} a {{ ranges[feature][1] }}."
+                required
+              >
+                <option value="">Seleccione una opción</option>
+                {% for item in options[feature] %}
+                <option value="{{ item.value }}" data-example="{{ item.example }}">
+                  {{ item.value }} - {{ item.label }}
+                </option>
+                {% endfor %}
+              </select>
+
+              <div class="form-text selected-help" id="help-{{ safe_id }}">
+                Rango original del dataset: {{ ranges[feature][0] }} a {{ ranges[feature][1] }}.
+              </div>
+
+              <details class="scale-guide">
+                <summary>Ver guía de puntuación y ejemplos</summary>
+                <div class="table-responsive mt-3">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Valor</th>
+                        <th>Nivel</th>
+                        <th>Ejemplo orientativo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for item in options[feature] %}
+                      <tr>
+                        <td><span class="value-pill">{{ item.value }}</span></td>
+                        <td>{{ item.label }}</td>
+                        <td class="text-muted">{{ item.example }}</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          </div>
+          {% endfor %}
+
+          <div class="col-12 d-flex flex-wrap gap-2 pt-1">
+            <button type="submit" class="btn btn-primary btn-main">Predecir</button>
+            <button type="reset" class="btn btn-outline-secondary btn-main">Limpiar</button>
+          </div>
+        </form>
+
+        <section id="result" class="result-area d-none">
+          <div class="result-banner">
+            <div>
+              <span class="section-kicker">Resultado</span>
+              <h2>Nivel de riesgo: <span id="risk-level" class="risk-chip"></span></h2>
+              <p id="note"></p>
+            </div>
+          </div>
+
+          <div class="content-grid">
+            <div class="panel-card values-panel">
+              <div class="panel-header panel-header-media">
+                <img src="{{ url_for('static', filename=report_images['summary']) }}" alt="Resumen" class="section-image">
+                <div>
+                  <span class="section-kicker">Entradas</span>
+                  <h3>Valores interpretados por el sistema</h3>
+                </div>
+              </div>
+              <div id="input-summary" class="row g-3"></div>
+            </div>
+
+            <div id="reportBox" class="panel-card report-panel d-none">
+              <div class="panel-header panel-header-media">
+                <img src="{{ url_for('static', filename=report_images['advice']) }}" alt="Reporte" class="section-image">
+                <div>
+                  <span class="section-kicker">Orientación</span>
+                  <h3>Reporte orientativo</h3>
+                </div>
+              </div>
+
+              <p id="generalMessage" class="report-message"></p>
+
+              <div class="report-subheader">
+                <img src="{{ url_for('static', filename=report_images['advice']) }}" alt="Recomendaciones" class="report-mini-image">
+                <h4>Recomendaciones específicas</h4>
+              </div>
+              <ul id="specificRecommendations" class="recommendation-list"></ul>
+
+              <div class="report-warning-box">
+                <img src="{{ url_for('static', filename=report_images['warning']) }}" alt="Advertencia" class="report-mini-image">
+                <div class="report-warning" id="reportWarning"></div>
+              </div>
+            </div>
+
+            <div class="panel-card probability-panel">
+              <div class="panel-header panel-header-media">
+                <img src="{{ url_for('static', filename=report_images['summary']) }}" alt="Probabilidades" class="section-image">
+                <div>
+                  <span class="section-kicker">Modelo</span>
+                  <h3>Probabilidades por clase</h3>
+                  <p>La clase con mayor probabilidad es tomada como predicción final. Esto no equivale a probabilidad clínica de tener cáncer.</p>
+                </div>
+              </div>
+              <div id="probabilities"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="error" class="d-none mt-4">
+          <div class="alert alert-danger mb-0"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const featureImages = {
+      {% for key, value in variable_images.items() %}
+      {{ key|tojson }}: {{ url_for('static', filename=value)|tojson }}{{ "," if not loop.last else "" }}
+      {% endfor %}
+    };
+
+    const form = document.getElementById('prediction-form');
+    const resultBox = document.getElementById('result');
+    const errorBox = document.getElementById('error');
+    const riskLevel = document.getElementById('risk-level');
+    const probabilities = document.getElementById('probabilities');
+    const inputSummary = document.getElementById('input-summary');
+    const note = document.getElementById('note');
+    const reportBox = document.getElementById('reportBox');
+    const generalMessage = document.getElementById('generalMessage');
+    const specificRecommendations = document.getElementById('specificRecommendations');
+    const reportWarning = document.getElementById('reportWarning');
+
+    function limpiarResultado() {
+      resultBox.classList.add('d-none');
+      errorBox.classList.add('d-none');
+      probabilities.innerHTML = '';
+      inputSummary.innerHTML = '';
+      riskLevel.textContent = '';
+      riskLevel.className = 'risk-chip';
+      note.textContent = '';
+      reportBox.classList.add('d-none');
+      generalMessage.textContent = '';
+      specificRecommendations.innerHTML = '';
+      reportWarning.textContent = '';
+    }
+
+    document.querySelectorAll('select').forEach((select) => {
+      select.addEventListener('change', () => {
+        const help = document.getElementById(select.dataset.helpId);
+        const selected = select.options[select.selectedIndex];
+        if (select.value) {
+          help.textContent = `Opción seleccionada: ${selected.textContent.trim()}. Revise la guía si necesita ejemplos.`;
+        } else {
+          help.textContent = select.dataset.rangeText || 'Seleccione la alternativa más cercana a la situación del usuario.';
+        }
+      });
+    });
+
+    form.addEventListener('reset', () => {
+      limpiarResultado();
+      setTimeout(() => {
+        document.querySelectorAll('select').forEach((select) => {
+          const help = document.getElementById(select.dataset.helpId);
+          help.textContent = select.dataset.rangeText || 'Seleccione la alternativa más cercana a la situación del usuario.';
+        });
+      }, 0);
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      limpiarResultado();
+
+      const formData = new FormData(form);
+      const payload = Object.fromEntries(formData.entries());
+
+      try {
+        const response = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'No se pudo realizar la predicción.');
+        }
+
+        riskLevel.textContent = `${data.risk_level_es} (${data.risk_level})`;
+        riskLevel.classList.add(`risk-${String(data.risk_level).toLowerCase()}`);
+        note.textContent = data.note || '';
+
+        if (data.input_descriptions) {
+          Object.entries(data.input_descriptions).forEach(([feature, item]) => {
+            const card = document.createElement('div');
+            card.className = 'col-md-6';
+            const imgSrc = featureImages[feature] || '';
+            card.innerHTML = `
+              <div class="input-card h-100">
+                <div class="input-card-top">
+                  <img src="${imgSrc}" alt="${item.label}" class="input-card-icon">
+                  <div>
+                    <div class="input-label">${item.label}</div>
+                    <div class="input-value">Valor ${item.value}</div>
+                    <div class="input-category">${item.category}</div>
+                  </div>
+                </div>
+                <div class="input-example">${item.example || ''}</div>
+              </div>
+            `;
+            inputSummary.appendChild(card);
+          });
+        }
+
+        if (data.report) {
+          reportBox.classList.remove('d-none');
+          generalMessage.textContent = data.report.mensaje_general || '';
+          specificRecommendations.innerHTML = '';
+
+          if (Array.isArray(data.report.recomendaciones_especificas)) {
+            data.report.recomendaciones_especificas.forEach((recommendation) => {
+              const li = document.createElement('li');
+              li.textContent = recommendation;
+              specificRecommendations.appendChild(li);
+            });
+          }
+          reportWarning.textContent = data.report.advertencia || '';
+        }
+
+        if (data.probabilities) {
+          Object.entries(data.probabilities).forEach(([label, value]) => {
+            const percent = (value * 100).toFixed(2);
+            const row = document.createElement('div');
+            row.className = 'probability-row';
+            row.innerHTML = `
+              <div class="probability-labels">
+                <span>${label}</span>
+                <strong>${percent}%</strong>
+              </div>
+              <div class="progress probability-progress" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" style="width:${percent}%"></div>
+              </div>
+            `;
+            probabilities.appendChild(row);
+          });
+        }
+
+        resultBox.classList.remove('d-none');
+        resultBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (error) {
+        errorBox.querySelector('.alert').textContent = error.message;
+        errorBox.classList.remove('d-none');
+      }
+    });
+  </script>
+</body>
+</html>
